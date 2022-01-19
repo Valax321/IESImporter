@@ -1,0 +1,60 @@
+#pragma kernel ComputeSpotCookie COOKIE_SPOT
+#pragma kernel ComputePointCookie COOKIE_POINT
+
+RWTexture2D<float4> Result;
+float2 ResultSize;
+float2 DataSize;
+
+Texture2D<float4> DataTexture;
+SamplerState texLinearClampSampler;
+
+// x is vertical minimum (almost always 0)
+// y is vertical maximum (often 90, sometimes 180)
+// z is horizontal minimum (can be anything in the 0-360 angle)
+// w is the horizontal maximum (anything in the 0-360 range)
+float4 AngleRanges;
+
+inline float dist(float2 a, float2 b)
+{
+    return length(abs(a - b));
+}
+
+inline float invLerp(float a, float b, float v)
+{
+    return (v - a) / (b - a);
+}
+
+inline float remap(float iMin, float iMax, float oMin, float oMax, float v)
+{
+    float t = invLerp(iMin, iMax, v);
+    return lerp(oMin, oMax, t);
+}
+
+void ComputeCookie(uint3 id)
+{
+    #ifdef COOKIE_SPOT
+    float2 rotVec = normalize(id.xy - ResultSize / 2);
+    float2 texelAngles = float2((dist(id.xy, ResultSize / 2) / length(ResultSize / 2)), atan2(rotVec.x, rotVec.y));
+    float2 dataPos = float2(remap(0, 360, 0, 1, clamp(texelAngles.y, AngleRanges.z, AngleRanges.w)), texelAngles.x);
+    #else
+    float2 texelAngles = float2(0, 0);
+    int2 dataPos = int2(0, 0);
+    #endif
+
+    // For some reason the sampling here has a lot of colour banding
+    // It seems like it's point sampling even though we're requesting a linear texture sampler?
+    float intensity = DataTexture.SampleLevel(texLinearClampSampler, dataPos, 0).z;
+    Result[id.xy] = float4(0, 0, 0, intensity);
+}
+
+[numthreads(8,8,1)]
+void ComputeSpotCookie (uint3 id : SV_DispatchThreadID)
+{
+    ComputeCookie(id);
+}
+
+[numthreads(8,8,1)]
+void ComputePointCookie (uint3 id : SV_DispatchThreadID)
+{
+    ComputeCookie(id);
+}
